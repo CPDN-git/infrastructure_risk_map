@@ -1,5 +1,5 @@
 ###### Making risk ratios for each grid cell, storing them
-###### in dataframe ready to be added to grid
+###### in numpy array ready to be added to grid
 
 import numpy as np
 import pandas as pd
@@ -39,21 +39,34 @@ def cell_risk_ratio(data,dataHist,lat_index,long_index,threshold,below):
 		return ratio
 	
 def grid_ratios(batches,dataHist,threshold,below):
-	i=0
+	
+	## initialising empty numpy array, 1D of length == no. of grid cells
 	ratio_array=np.empty(dataHist.shape[3]*dataHist.shape[4])
 	print ratio_array.shape
+	
+	
 	for batch in batches:
 		print('new batch')
 		ratios=[]	
+		
+		## iterating over grid cells, going along longitude axis
 		for lat_index in range(batch.shape[3]):
 			for long_index in range(batch.shape[4]):
+				
+				## for current batch and grid cell, calculate risk ratio for threshold across all ensembles
 				ratio=cell_risk_ratio(batch,dataHist,lat_index,long_index,threshold,below)
 				ratios+=[ratio]
 				print ('ratio for ' + str(lat_index) +',' + str(long_index)+
 				 ' = ' + str(ratio))
-		ratios=np.array(ratios)
-		ratio_array=np.column_stack([ratio_array,ratios])
 		
+		## make array of all ratios from list		 
+		ratios=np.array(ratios)
+		
+		## append array column to empty column
+		ratio_array=np.column_stack([ratio_array,ratios])
+	
+	## remove the empty arrray column
+	ratio_array=np.delete(ratio_array,0,1)	
 	return ratio_array
 	
 	
