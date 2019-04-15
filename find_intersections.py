@@ -2,6 +2,7 @@
 ##### other line shapefile by using points of minimum distance
 
 import geopandas as gpd
+import pandas as pd
 from shapely.geometry import Polygon
 from shapely.geometry import LineString
 from shapely.geometry import Point
@@ -47,6 +48,64 @@ def overlapped_lines(linefile_gdf,box_gdf):
 	
 	return overlap
 	
+def average_height(towers_gdf,box_gdf):
+	
+	## all towers within box
+	temp=gpd.sjoin(towers_gdf,box_gdf,how='inner',op='intersects')
+	
+	
+	if not temp.empty:
+		counts=[]
+		lines=[u'L6',u'L8',u'L2',u'L12',u'L7',u'WOOD',u'L3',u'L66']
+		heights=[50.6,50.5,42,46.3,26.2,10,38,34]
+		
+		cum_height=0
+		
+		temp['LINE_SERIE']=temp['LINE_SERIE'].str.strip()
+		
+		
+		maxi=0
+		idx=''
+		
+		for line in lines:
+			if line in temp.LINE_SERIE.values:
+				
+				count= (temp.LINE_SERIE == line).sum()
+				counts+=[count]
+				cum_height+=count*heights[lines.index(line)]
+				
+				if count > maxi:
+					maxi=count
+					idx=lines.index(line)
+		
+		
+		towers_added=sum(counts)
+		
+		default=heights[idx]
+		
+		
+		
+		
+		remaining=temp.shape[0]-towers_added
+		
+		
+		cum_height+=remaining*default
+					
+		
+		
+		average=cum_height/temp.shape[0]
+		
+		
+		return average
+	else:
+		return 0
+				
+		
+		
+		
+	
+	
+	
 def output_weights(lines_gdf):
 	if lines_gdf.empty:
 		return 0
@@ -62,6 +121,7 @@ def output_weights(lines_gdf):
 	
 	length=lines_gdf['geometry'].length.sum()
 	return length
+	
 
 	
 	
@@ -69,9 +129,95 @@ def output_weights(lines_gdf):
 def main():
 
 	shape_dir = '/home/users/jburns59/NatGridShapes/'
-	OHL_link = shape_dir + 'OHLs/'
-	OHLs_400 = gpd.read_file(OHL_link + '400kV/OHLs_400.shp')
+	towers_link = shape_dir + 'Towers/'
+	towers = gpd.read_file(towers_link + 'Towers.shp')
 
+	#for r in range(towers.shape[0]): 
+	#	print towers.iloc[r]
+	
+	
+	print towers.LINE_SERIE
+	#print towers.TOWER_CONS
+	
+	duplicates=[]
+	for line in towers.LINE_SERIE:
+		if line not in duplicates:
+			duplicates += [line]
+	
+	
+	line_series=[]
+	tower_construction=[]
+	number=[]
+	
+	for line in duplicates:
+		print('\n')
+		#print towers[towers.LINE_SERIE == line]
+		tow_cons= towers.TOWER_CONS[towers.LINE_SERIE == line]
+		
+		#print towers.TOWER_CONS[towers.LINE_SERIE == line].shape[0]
+		
+		duplicate_towers=[]
+		for r in range(tow_cons.shape[0]):
+			if  tow_cons.iloc[r] not in duplicate_towers:
+				duplicate_towers += [tow_cons.iloc[r]]
+				line_series +=[line]
+				tower_construction+=[tow_cons.iloc[r]]
+		
+	line_frame=pd.DataFrame({'Lineseries':line_series,'Tower_con':tower_construction})
+	
+	count=[]
+	for r in range(line_frame.shape[0]):
+		count+= [towers[(towers.LINE_SERIE == line_frame.Lineseries.iloc[r]) & (towers.TOWER_CONS == line_frame.Tower_con.iloc[r])].shape[0]]
+	
+	line_frame['number']=count	
+	
+	print line_frame	
+	
+	print line_frame.number.sum()
+	print towers.shape[0]
+			
+	
+	
+	#line_frame.to_pickle('tower_heights.pkl')
+	
+	line_frame=line_frame.sort_values(by=['Lineseries','number'],ascending=False)
+	
+	print line_frame
+	
+	print duplicates
+	
+	main_lines=pd.DataFrame()
+	
+	limit=1
+	
+	for line in duplicates:
+		frame=line_frame[line_frame.Lineseries == line]
+		#print frame
+		
+		print(str(line) + '		' + str(frame.number.sum()))
+		if frame.shape[0] > limit:
+			for i in range(limit):
+				#print frame.iloc[i]
+				main_lines=main_lines.append(frame.iloc[i])
+		else:
+			for i in range(frame.shape[0]):
+				#print frame.iloc[i]
+				main_lines=main_lines.append(frame.iloc[i])
+			
+	print main_lines
+	
+	#main_lines.to_pickle('primary_line_types.pkl')
+	
+	raise
+	
+	duplicates=[]
+	for line in towers.TOWER_CONS:
+		if line not in duplicates:
+			duplicates += [line]
+	print duplicates
+	
+	
+	raise
 
 	line=[LineString([Point(-5,50),Point(-3,52)])]
 	line_gdf=gpd.GeoDataFrame({'geometry':line})
@@ -89,7 +235,7 @@ def main():
 	box_gdf=gpd.GeoDataFrame({'geometry':box})
 	box_gdf.crs=OHLs_400.crs
 
-	
+
 	#### test plots the entirety of any linestrings that touch the box
 
 	test= gpd.sjoin( OHLs_400,box_gdf, how="inner", op='intersects')

@@ -18,15 +18,13 @@ from shapely.geometry import MultiPoint
 from shapely.geometry import LineString
 from shapely import wkt
 from plot_grid_v3 import gen_line_grid
-from find_intersections import output_weights,overlapped_lines
-
+from find_intersections import output_weights,overlapped_lines,average_height
+from wind_vs_height import wind_scale_for_grid
 
 def add_column(df,name_string,values):
 	df[name_string]=values
 	return df
 
-
-PYTHONHASHSEED=0
 
 ##################################
 #importing natGrid shapefiles
@@ -52,7 +50,7 @@ df_dno_link = shape_dir + 'Britain/df_dno.shp'
 britain = gpd.read_file(df_dno_link)
 
 #df_edges_link = shape_dir + 'OHLs/11kv_NW/df_edges_gr11kv.shp'
-#df_edges = gpd.read_file(df_edges_link)
+#OHLs_11 = gpd.read_file(df_edges_link)
 
 
 
@@ -60,7 +58,7 @@ britain = gpd.read_file(df_dno_link)
 
 #reference points
 
-cities = pd.DataFrame({'City':['London','Birmingham','Manchester','Leeds','Newcastle'],'Country':['UK','UK','UK','UK','UK'],'Latitude':[51.51279,52.48667,53.478904,53.802122,54.975496],'Longitude':[-0.09184,-1.89194,-2.24395,-1.549483,-1.614543]})
+cities = pd.DataFrame({'City':['London','Birmingham','Manchester','Leeds','Newcastle','Cardiff','Plymouth'],'Country':['UK','UK','UK','UK','UK','UK','UK'],'Latitude':[51.51279,52.48667,53.478904,53.802122,54.975496,51.48,50.376289],'Longitude':[-0.09184,-1.89194,-2.24395,-1.549483,-1.614543,-3.18,-4.143841]})
 
 cities['Coordinates'] = list(zip(cities.Longitude,cities.Latitude))
 cities['Coordinates'] = cities['Coordinates'].apply(Point)
@@ -78,12 +76,12 @@ towers = towers.to_crs(cities_gdf.crs)
 #cables = cables.to_crs(cities_gdf.crs)
 britain = britain.to_crs(cities_gdf.crs)
 subs = subs.to_crs(cities_gdf.crs)
-#df_edges = df_edges.to_crs(cities_gdf.crs)
+#OHLs_11 = OHLs_11.to_crs(cities_gdf.crs)
 OHLs=OHLs.to_crs(cities_gdf.crs)
 
 #print subs
 
-lenny=OHLs['geometry'].length.sum()
+#lenny=OHLs['geometry'].length.sum()
 
 
 
@@ -118,6 +116,9 @@ britain=plottable_frame(frame=britain,label=''
 subs=plottable_frame(frame=subs,label='Substations'
 ,colour='green',alpha=1)
 
+#OHLs_11=plottable_frame(frame=OHLs_11,label='OHLs 11kV'
+#,colour='green',alpha=0.7)
+
 
 ###### making polygon grid
 #grid=gen_grid_v3(xmin=-5,ymin=50.125,xmax=1.75,ymax=54.875,width=0.25,height=0.25)
@@ -129,20 +130,85 @@ print grid.iloc[0]
 
 ############### finding amount of infrastructure within each grid
 
-frames=[subs]
+frames=[]
+
 
 for frame in frames:
+	print('\ngetting weights')
 	weights=[]
+	print(grid.shape[0])
 	print (frame.get_label() + '\n')
 	for r in range(grid.shape[0]):
+		print(r)
 		weights+=[output_weights(overlapped_lines(box_gdf=grid.iloc[[r]],linefile_gdf=frame.get_frame()))]
 	grid=add_column(grid,frame.get_label(),weights)	
-	print grid.to_string()	
+	
+print('Done with weights!')	
+
 
 #grid.to_file('grid_w_weights.shp',driver='ESRI Shapefile')
 
-print grid[subs.get_label()]
 
+################ finding representative heights
+
+
+
+frames=[]
+
+for frame in frames:
+	print('\ngetting heights')
+	heights=[]
+	print(grid.shape[0])
+	print (frame.get_label() + '\n')
+	for r in range(grid.shape[0]):
+		print(r)
+		heights+=[average_height(box_gdf=grid.iloc[[r]],towers_gdf=frame.get_frame())]
+	#grid=add_column(grid,'height',heights)	
+	
+print('Done with heights!')
+
+#grid['height']=heights
+
+
+
+
+
+########### Addding wind scaling for differentivate heights
+print grid.wind_scale
+
+
+scales=wind_scale_for_grid(grid,measurement_height=10)
+print np.amax(scales)
+print np.amin(scales[scales>1])
+#grid['wind_scale']=scales
+
+for r in range(grid.shape[0]):
+	print(str(grid.height.iloc[r]) + '		' + str(grid['wind_scale'].iloc[r]))
+
+grid.to_file('grid_w_weights.shp',driver='ESRI Shapefile')
+
+########## Adding risk ratios to grid TRIAL
+
+dataRisk=np.load('risk_ratio_above_298K_new.npy')
+
+grid['risk_1.5']=dataRisk[:,0]
+grid['risk_2']=dataRisk[:,1]
+
+print grid
+print grid['risk_1.5']
+print grid['risk_2']
+
+print np.amax(dataRisk,0)
+
+x=np.array(dataRisk[:,0])
+vals=x[x>1]
+min_15=np.amin(vals)
+
+x=np.array(dataRisk[:,1])
+vals=x[x>1]
+min_2=np.amin(vals)
+
+print min_15
  
 
 
@@ -173,35 +239,52 @@ print grid[subs.get_label()]
 
 #grid['vals']=weights
 
-
+###### List of frames you want to plot, excluding the grid
 frames=[towers,OHLs_275,OHLs_132,OHLs_400,britain,subs]
 
 
 patches=[]
 
+print('\nPlotting')
+
 f, (ax, ax2) = plt.subplots(ncols=2, sharex=True, sharey=True)
+axes=[ax,ax2]
+
+## counter to prevent stack of patches in legend
+i=0
+for a in axes:
+	for dataframe in frames:
+		## looping over plottable frame objects and plotting
+		dataframe.get_frame().plot(axes=a,alpha=dataframe.get_alpha(),color=dataframe.get_colour(),markersize=dataframe.get_size())
+		## checking for label, and if it has one, creating a legend patch for it
+		if dataframe.get_label() != '' and i==0:
+			patches+=[mpatches.Patch(color=dataframe.get_colour(),label=dataframe.get_label())]
+	i=1
+
+	for x, y, label in zip(cities_gdf.geometry.x, cities_gdf.geometry.y, cities_gdf.City):
+		a.annotate(label, xy=(x,y), xytext=(3,3), textcoords="offset points")
+	cities_gdf.plot(axes=ax,color='black',markersize=1)
 
 
-for dataframe in frames:
-	## looping over plottable frame objects and plotting
-	dataframe.get_frame().plot(axes=ax,alpha=dataframe.get_alpha(),color=dataframe.get_colour(),markersize=dataframe.get_size())
-	## checking for label, and if it has one, creating a legend patch for it
-	if dataframe.get_label() != '':
-		patches+=[mpatches.Patch(color=dataframe.get_colour(),label=dataframe.get_label())]
+cmap = plt.cm.plasma
+cmap.set_under(color='white')
 
 
-for x, y, label in zip(cities_gdf.geometry.x, cities_gdf.geometry.y, cities_gdf.City):
-	ax.annotate(label, xy=(x,y), xytext=(3,3), textcoords="offset points")
-cities_gdf.plot(axes=ax,color='black',markersize=1)
+grid.plot(axes=ax,column='risk_1.5',cmap=cmap,alpha=0.7,legend=True,vmin=min_15)
+grid.plot(axes=ax2,column='risk_2',cmap=cmap,alpha=0.7,legend=True,vmin=min_2)
 
 
-grid.plot(axes=ax,column=subs.get_label(),cmap='Greys',alpha=0.7)
-grid.plot(axes=ax2,column=subs.get_label(),cmap='Greys',alpha=1)
+f.suptitle('Map of risk ratio for temperatures above 25C')
+
+ax.set(xlabel='Longitude',ylabel='Latitude')
+ax2.set(xlabel='Longitude',ylabel='Latitude')
+ax.set_title('1.5 degree warming')
+ax2.set_title('2 degree warming')
 
 
-f.suptitle('Nat Grid Overhead Lines, Towers, and Substations')
+
 plt.legend(handles=patches)
-plt.savefig('map_with_split_OHLs.png')
+plt.savefig('25deg_risk.png')
 plt.show()
 
 
